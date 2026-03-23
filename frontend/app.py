@@ -1,25 +1,20 @@
 import os
 import base64
+
 import requests
-import uuid
-from io import BytesIO
-from flask import Flask, render_template, request, send_file, abort
+from flask import Flask, render_template, request
 
 app = Flask(__name__)
 
 API_URL = os.getenv("BG_REMOVE_API_URL", "http://127.0.0.1:8000").rstrip("/")
 
-# Simple in-memory cache for downloads (token -> png bytes)
-DOWNLOAD_CACHE: dict[str, bytes] = {}
-MAX_CACHE_ITEMS = 25  # avoid unbounded memory use
+
+def to_data_url(file_bytes: bytes, mime_type: str) -> str:
+    return f"data:{mime_type};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
 
 
-def _cache_put(token: str, data: bytes) -> None:
-    DOWNLOAD_CACHE[token] = data
-    # trim old items (FIFO-ish)
-    while len(DOWNLOAD_CACHE) > MAX_CACHE_ITEMS:
-        oldest_key = next(iter(DOWNLOAD_CACHE))
-        DOWNLOAD_CACHE.pop(oldest_key, None)
+def to_bool(value: str | None) -> bool:
+    return str(value).lower() in {"1", "true", "on", "yes"}
 
 
 @app.get("/")
@@ -27,72 +22,119 @@ def index():
     return render_template("index.html")
 
 
-@app.post("/remove")
-def remove():
-    if "image" not in request.files:
-        return render_template("index.html", error="No file uploaded.")
+@app.post("/replace")
+def replace():
+    car_file = request.files.get("image")
+    bg_file = request.files.get("background")
 
-    f = request.files["image"]
-    if not f.filename:
-        return render_template("index.html", error="Please choose a file.")
+    if not car_file or not car_file.filename:
+        return render_template("index.html", error="Please choose a car image.")
 
-    # Read uploaded bytes once (so we can preview it)
-    uploaded_bytes = f.read()
-    if not uploaded_bytes:
-        return render_template("index.html", error="Uploaded file is empty.")
+    if not bg_file or not bg_file.filename:
+        return render_template("index.html", error="Please choose a background image.")
 
-    uploaded_preview = (
-        f"data:{f.mimetype or 'image/jpeg'};base64,"
-        + base64.b64encode(uploaded_bytes).decode("utf-8")
-    )
+    car_bytes = car_file.read()
+    bg_bytes = bg_file.read()
 
-    endpoint = f"{API_URL}/upload-image"
-    files = {"image": (f.filename, uploaded_bytes, f.mimetype or "application/octet-stream")}
+    if not car_bytes:
+        return render_template("index.html", error="The car image is empty.")
+
+    if not bg_bytes:
+        return render_template("index.html", error="The background image is empty.")
+
+    car_preview = to_data_url(car_bytes, car_file.mimetype or "image/jpeg")
+    background_preview = to_data_url(bg_bytes, bg_file.mimetype or "image/jpeg")
+
+    car_size = request.form.get("car_size", "60")
+    smart_placement = to_bool(request.form.get("smart_placement", "true"))
+
+    endpoint = f"{API_URL}/replace-background-all-models"
+
+    files = {
+        "image": (car_file.filename, car_bytes, car_file.mimetype or "application/octet-stream"),
+        "background": (bg_file.filename, bg_bytes, bg_file.mimetype or "application/octet-stream"),
+    }
+
+    data = {
+        "car_size": car_size,
+        "smart_placement": str(smart_placement).lower(),
+    }
 
     try:
-        r = requests.post(endpoint, files=files, timeout=300)
-        r.raise_for_status()
+        response = requests.post(endpoint, files=files, data=data, timeout=300)
+        response.raise_for_status()
+        payload = response.json()
 
-        content_type = (r.headers.get("Content-Type") or "").lower()
-        if not content_type.startswith("image/"):
-            # The API should return a PNG now; if it doesn't, show a helpful error
-            return render_template(
-                "index.html",
-                error=f"API returned unexpected content-type: {content_type}. Body: {r.text[:300]}",
-                uploaded_preview=uploaded_preview,
+        results = []
+        for item in payload.get("results", []):
+            if item.get("status") != "success":
+                continue
+
+            output_url = item.get("output_url")
+            if not output_url:
+                continue
+
+            full_output_url = f"{API_URL}{output_url}"
+
+            results.append(
+                {
+                    "model": item.get("model", "Unknown model"),
+                    "preview_url": full_output_url,
+                    "download_url": full_output_url,
+                    "output_filename": item.get("output_filename", "result.png"),
+                }
             )
 
-        processed_bytes = r.content
-        processed_preview = (
-            "data:image/png;base64," + base64.b64encode(processed_bytes).decode("utf-8")
-        )
-
-        token = uuid.uuid4().hex
-        _cache_put(token, processed_bytes)
+        if not results:
+            return render_template(
+                "index.html",
+                error="The API finished, but no successful model results were returned.",
+                car_preview=car_preview,
+                background_preview=background_preview,
+                car_size=car_size,
+                smart_placement=smart_placement,
+            )
 
         return render_template(
             "index.html",
-            uploaded_preview=uploaded_preview,
-            processed_preview=processed_preview,
-            download_token=token,
+            car_preview=car_preview,
+            background_preview=background_preview,
+            results=results,
+            total_models=payload.get("total_models"),
+            successful_models=payload.get("successful_models"),
+            failed_models=payload.get("failed_models"),
+            duration_seconds=payload.get("duration_seconds"),
+            car_size=car_size,
+            smart_placement=smart_placement,
+        )
+
+    except requests.HTTPError:
+        error_message = "Background replacement failed."
+        try:
+            error_json = response.json()
+            error_detail = error_json.get("detail", error_json)
+            error_message = f"API error: {error_detail}"
+        except ValueError:
+            error_message = f"API error: {response.text[:300]}"
+
+        return render_template(
+            "index.html",
+            error=error_message,
+            car_preview=car_preview,
+            background_preview=background_preview,
+            car_size=car_size,
+            smart_placement=smart_placement,
         )
 
     except requests.RequestException as e:
-        return render_template("index.html", error=f"API error: {e}", uploaded_preview=uploaded_preview)
-
-
-@app.get("/download/<token>")
-def download(token: str):
-    data = DOWNLOAD_CACHE.get(token)
-    if not data:
-        abort(404)
-
-    return send_file(
-        BytesIO(data),
-        mimetype="image/png",
-        as_attachment=True,
-        download_name="bg-removed.png",
-    )
+        return render_template(
+            "index.html",
+            error=f"Connection error: {e}",
+            car_preview=car_preview,
+            background_preview=background_preview,
+            car_size=car_size,
+            smart_placement=smart_placement,
+        )
 
 
 if __name__ == "__main__":
