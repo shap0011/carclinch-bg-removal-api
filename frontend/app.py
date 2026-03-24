@@ -96,13 +96,15 @@ def replace():
         )
 
     except requests.HTTPError:
-        error_message = "Background replacement failed."
-        try:
-            error_json = response.json()
-            error_detail = error_json.get("detail", error_json)
-            error_message = f"API error: {error_detail}"
-        except ValueError:
-            error_message = f"API error: {response.text[:300]}"
+        if response.status_code == 502:
+            error_message = "The server is busy. Please try again in a moment."
+        else:
+            try:
+                error_json = response.json()
+                error_detail = error_json.get("detail", error_json)
+                error_message = f"API error: {error_detail}"
+            except ValueError:
+                error_message = "Unexpected server error. Please try again."
 
         return render_template(
             "index.html",
@@ -113,10 +115,12 @@ def replace():
             smart_placement=smart_placement,
         )
 
-    except requests.RequestException as e:
+    except requests.RequestException:
+        error_message = "Connection issue. Please try again."
+
         return render_template(
             "index.html",
-            error=f"Connection error: {e}",
+            error=error_message,
             car_preview=car_preview,
             background_preview=background_preview,
             car_size=car_size,
