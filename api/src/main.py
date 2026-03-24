@@ -7,6 +7,8 @@ from pathlib import Path
 import asyncio
 import time
 
+from uuid import uuid4
+
 from fastapi import FastAPI, File, HTTPException, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -141,10 +143,15 @@ def replace_background_endpoint(
 
     _, input_dir, output_dir = get_dirs()
 
-    fg_path = input_dir / f"fg_{fg_filename_str}"
-    bg_path = input_dir / f"bg_{bg_filename_str}"
+    request_id = uuid4().hex
 
-    output_name = f"replaced_{Path(fg_filename_str).stem}.png"
+    fg_ext = Path(fg_filename_str).suffix or ".png"
+    bg_ext = Path(bg_filename_str).suffix or ".png"
+
+    fg_path = input_dir / f"{request_id}_fg{fg_ext}"
+    bg_path = input_dir / f"{request_id}_bg{bg_ext}"
+
+    output_name = f"{request_id}_replaced.png"
     output_path = output_dir / output_name
 
     try:
@@ -169,9 +176,29 @@ def replace_background_endpoint(
             status_code=500,
             detail=f"Processing failed: {str(e)}",
         )
+        
     finally:
-        image.file.close()
-        background.file.close()
+        try:
+            image.file.close()
+        except Exception:
+            pass
+
+        try:
+            background.file.close()
+        except Exception:
+            pass
+
+        try:
+            if fg_path.exists():
+                fg_path.unlink()
+        except Exception:
+            pass
+
+        try:
+            if bg_path.exists():
+                bg_path.unlink()
+        except Exception:
+            pass
 
     return {
         "input_foreground": fg_path.name,
