@@ -73,8 +73,17 @@ button {
     background: #888;
 }
 
+.error::before {
+    content: "⚠ ";
+}
+
 .error {
-    color: red;
+    color: #b45309;            
+    background: #fef3c7;       
+    border: 1px solid #fcd34d;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
     text-align: center;
 }
 
