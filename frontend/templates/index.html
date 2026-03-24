@@ -16,7 +16,7 @@
       <h1>Car Background Replacement</h1>
 
       <!-- Upload Card -->
-      <div class="card">
+      <div class="card form-card">
         <form
           method="POST"
           action="/replace"
@@ -24,33 +24,62 @@
           id="replace-form"
         >
           <div class="form-group">
-            <label>Car Image</label>
-            <input type="file" name="image" required />
+            <label for="image">Car Image</label>
+            <input type="file" id="image" name="image" required />
           </div>
 
           <div class="form-group">
-            <label>Background Image</label>
-            <input type="file" name="background" required />
+            <label for="background">Background Image</label>
+            <input type="file" id="background" name="background" required />
           </div>
 
-          <div class="form-group">
-            <label>Car Size (%)</label>
-            <input type="number" name="car_size" value="60" />
+          <div class="settings-row">
+            <div class="form-group size-group">
+              <label for="car_size">Car Size (%)</label>
+              <input
+                type="number"
+                id="car_size"
+                name="car_size"
+                value="{{ car_size or '60' }}"
+                min="1"
+                max="100"
+              />
+            </div>
+
+            <div class="form-group checkbox-group compact-checkbox">
+              <label for="smart_placement">
+                <input
+                  type="checkbox"
+                  id="smart_placement"
+                  name="smart_placement"
+                  {%
+                  if
+                  smart_placement
+                  is
+                  not
+                  defined
+                  or
+                  smart_placement
+                  %}checked{%
+                  endif
+                  %}
+                />
+                Smart Placement
+              </label>
+            </div>
           </div>
 
-          <div class="form-group checkbox-group">
-            <label>
-              <input type="checkbox" name="smart_placement" checked />
-              Smart Placement
-            </label>
+          <div class="button-row">
+            <button type="submit" id="submit-btn">Replace Background</button>
+            <button
+              type="button"
+              class="clear-btn"
+              onclick="location.href = '/'"
+            >
+              Clear Results
+            </button>
           </div>
-
-          <button type="submit" id="submit-btn">Replace Background</button>
         </form>
-
-        <button class="clear-btn" onclick="location.href = '/'">
-          Clear Results
-        </button>
 
         <p id="loading-message" class="loading-text" style="display: none">
           Processing images... please wait.
@@ -63,35 +92,47 @@
       {% endif %}
 
       <!-- Input previews -->
-      {% if car_preview %}
-      <div class="card">
-        <h3>Car Image</h3>
-        <img src="{{ car_preview }}" class="preview" />
-      </div>
-      {% endif %} {% if background_preview %}
-      <div class="card">
-        <h3>Background Image</h3>
-        <img src="{{ background_preview }}" class="preview" />
+      {% if car_preview or background_preview %}
+      <div class="preview-grid">
+        {% if car_preview %}
+        <div class="card form-card">
+          <h3>Car Image</h3>
+          <img
+            src="{{ car_preview }}"
+            class="preview"
+            alt="Uploaded car image preview"
+          />
+        </div>
+        {% endif %} {% if background_preview %}
+        <div class="card form-card">
+          <h3>Background Image</h3>
+          <img
+            src="{{ background_preview }}"
+            class="preview"
+            alt="Uploaded background image preview"
+          />
+        </div>
+        {% endif %}
       </div>
       {% endif %}
 
       <!-- Results -->
-      {% if results %}
-      <div class="card">
-        <h2>Results by Model</h2>
-        <p class="small-text">Click any image to preview</p>
+      {% if result %}
+      <div class="card form-card">
+        <h2>Result</h2>
+        <p class="small-text">Click image to preview</p>
 
-        {% for r in results %}
         <div class="result-card">
-          <h4>{{ r.model }}</h4>
+          <img
+            src="{{ result.preview_url }}"
+            alt="Processed result"
+            onclick="openModal(this.src)"
+          />
 
-          <img src="{{ r.preview_url }}" onclick="openModal(this.src)" />
-
-          <a href="{{ r.download_url }}" download>
-            <button class="download-btn">Download</button>
+          <a href="{{ result.download_url }}">
+            <button class="download-btn" type="button">Download</button>
           </a>
         </div>
-        {% endfor %}
       </div>
       {% endif %}
     </div>
@@ -99,7 +140,7 @@
     <!-- Modal -->
     <div id="modal" class="modal" onclick="closeModal()">
       <span class="close">&times;</span>
-      <img id="modal-img" />
+      <img id="modal-img" onclick="event.stopPropagation()" />
     </div>
 
     <script>
@@ -123,6 +164,13 @@
           loadingMessage.style.display = "block";
         });
       }
+
+      window.addEventListener("load", function () {
+        const input = document.querySelector('input[name="car_size"]');
+        if (input && !input.value) {
+          input.value = 60;
+        }
+      });
     </script>
   </body>
 </html>

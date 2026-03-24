@@ -1,8 +1,9 @@
 import os
 import base64
+from io import BytesIO
 
 import requests
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, send_file
 
 app = Flask(__name__)
 
@@ -48,7 +49,7 @@ def replace():
     car_size = request.form.get("car_size", "60")
     smart_placement = to_bool(request.form.get("smart_placement", "true"))
 
-    endpoint = f"{API_URL}/replace-background-all-models"
+    endpoint = f"{API_URL}/replace-background"
 
     files = {
         "image": (car_file.filename, car_bytes, car_file.mimetype or "application/octet-stream"),
@@ -61,49 +62,35 @@ def replace():
     }
 
     try:
-        response = requests.post(endpoint, files=files, data=data, timeout=300)
+        response = requests.post(endpoint, files=files, data=data, timeout=180)
         response.raise_for_status()
         payload = response.json()
 
-        results = []
-        for item in payload.get("results", []):
-            if item.get("status") != "success":
-                continue
-
-            output_url = item.get("output_url")
-            if not output_url:
-                continue
-
-            full_output_url = f"{API_URL}{output_url}"
-
-            results.append(
-                {
-                    "model": item.get("model", "Unknown model"),
-                    "preview_url": full_output_url,
-                    "download_url": full_output_url,
-                    "output_filename": item.get("output_filename", "result.png"),
-                }
-            )
-
-        if not results:
+        output_filename = payload.get("output_filename")
+        if not output_filename:
             return render_template(
                 "index.html",
-                error="The API finished, but no successful model results were returned.",
+                error="The API finished, but no output image was returned.",
                 car_preview=car_preview,
                 background_preview=background_preview,
                 car_size=car_size,
                 smart_placement=smart_placement,
             )
 
+        output_url = f"{API_URL}/output/{output_filename}"
+
+        result = {
+            "model": "isnet-general-use",
+            "preview_url": output_url,
+            "download_url": f"/download?file_url={output_url}&filename={output_filename}",
+            "output_filename": output_filename,
+        }
+
         return render_template(
             "index.html",
             car_preview=car_preview,
             background_preview=background_preview,
-            results=results,
-            total_models=payload.get("total_models"),
-            successful_models=payload.get("successful_models"),
-            failed_models=payload.get("failed_models"),
-            duration_seconds=payload.get("duration_seconds"),
+            result=result,
             car_size=car_size,
             smart_placement=smart_placement,
         )
@@ -135,8 +122,29 @@ def replace():
             car_size=car_size,
             smart_placement=smart_placement,
         )
+        
+@app.get("/download")
+def download():
+    file_url = request.args.get("file_url")
+    filename = request.args.get("filename", "result.png")
 
+    if not file_url:
+        return "Missing file URL", 400
+
+    try:
+        response = requests.get(file_url, timeout=180)
+        response.raise_for_status()
+
+        return send_file(
+            BytesIO(response.content),
+            mimetype="image/png",
+            as_attachment=True,
+            download_name=filename,
+        )
+    except requests.RequestException as e:
+        return f"Download failed: {e}", 500
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=True)
+    
