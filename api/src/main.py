@@ -19,8 +19,8 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 root_dir = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(root_dir))
 
-from api.src.constants import ALLOWED_EXTENSIONS, SUPPORTED_MODELS
-from api.src.util import process_model_replacement, validate_uploaded_image
+from src.constants import ALLOWED_EXTENSIONS, SUPPORTED_MODELS
+from src.util import process_model_replacement, validate_uploaded_image
 from core import processor
 
 app = FastAPI()
